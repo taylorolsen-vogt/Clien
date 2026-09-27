@@ -986,7 +986,7 @@ body {
 
 .lead-tools input,
 .lead-tools select,
-.lead-controls select {
+.lead-status-button {
   min-width: 0;
   height: 34px;
   border: 1px solid rgba(0, 0, 0, 0.55);
@@ -1059,8 +1059,99 @@ body {
   gap: 7px;
 }
 
-.lead-controls select {
+.lead-status-menu {
+  position: relative;
   width: 112px;
+}
+
+.lead-status-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  cursor: pointer;
+}
+
+.lead-status-options {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  width: 152px;
+  border: 1px solid var(--black);
+  background: var(--white);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.16);
+}
+
+.lead-status-options[hidden] {
+  display: none;
+}
+
+.lead-status-options button {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.16);
+  background: var(--white);
+  color: var(--black);
+  padding: 7px 10px;
+  text-align: left;
+  font: 0.66rem 'Courier New', Courier, monospace;
+  cursor: pointer;
+}
+
+.lead-status-options button:hover,
+.lead-status-options button:focus-visible,
+.lead-status-options button[aria-checked='true'] {
+  background: var(--black);
+  color: var(--white);
+  outline: none;
+}
+
+.lead-status-options .lead-profile-button {
+  border-top: 2px solid var(--black);
+  border-bottom: 0;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.lead-profile {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  padding: 15px 0 4px;
+  border-top: 1px solid rgba(0, 0, 0, 0.16);
+  font: 0.66rem/1.45 'Courier New', Courier, monospace;
+}
+
+.lead-profile[hidden] {
+  display: none;
+}
+
+.lead-profile > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.lead-profile strong {
+  font-size: 0.56rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lead-profile span,
+.lead-profile a {
+  overflow-wrap: anywhere;
+  color: var(--black);
+}
+
+.lead-profile p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: rgba(0, 0, 0, 0.58);
 }
 
 .lead-assess {
@@ -1212,6 +1303,11 @@ body {
     grid-column: 2;
   }
 
+  .lead-profile {
+    grid-column: 2;
+    grid-template-columns: 1fr;
+  }
+
   .lead-batch-tools {
     grid-template-columns: 1fr auto;
     padding-block: 10px;
@@ -1243,7 +1339,7 @@ body {
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
-  .lead-controls select {
+  .lead-status-menu {
     width: 100%;
   }
 

@@ -1142,6 +1142,17 @@ app.post('/api/leads/extract', async (req, res) => {
   res.json({ leads });
 });
 
+app.post('/api/leads/:id/enrich', async (req, res) => {
+  const archive = readLeads();
+  const lead = archive.leads.find((candidate) => candidate.id === req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Lead not found.' });
+  const profile = await extractLeadProfile(lead.url);
+  if (!profile) return res.status(422).json({ error: 'Company information could not be extracted.' });
+  Object.assign(lead, profile, { id: lead.id, status: lead.status, createdAt: lead.createdAt, updatedAt: new Date().toISOString() });
+  writeLeads(archive);
+  res.json(lead);
+});
+
 app.post('/api/leads', (req, res) => {
   const candidates = Array.isArray(req.body && req.body.leads) ? req.body.leads : [];
   const archive = readLeads();

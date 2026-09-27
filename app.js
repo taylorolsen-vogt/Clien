@@ -293,6 +293,48 @@ function updateBatchControls(visibleLeads = getVisibleLeads()) {
   assessSelectedLeads.disabled = selectedLeadIds.size === 0;
 }
 
+function populateLeadProfile(container, lead) {
+  container.textContent = '';
+  const profileValues = [
+    ['Address', lead.address],
+    ['Owners / founders', Array.isArray(lead.owners) ? lead.owners.join(', ') : ''],
+    ['Industry', lead.industry],
+    ['Mission / summary', lead.summary],
+    ['Email', lead.email],
+    ['Phone', lead.phone]
+  ].filter(([, value]) => value);
+  if (profileValues.length === 0) {
+    const empty = document.createElement('p');
+    empty.textContent = 'No organization details found on the public website.';
+    container.appendChild(empty);
+  } else {
+    profileValues.forEach(([label, value]) => {
+      const item = document.createElement('div');
+      const term = document.createElement('strong');
+      const detail = document.createElement('span');
+      term.textContent = label;
+      detail.textContent = value;
+      item.append(term, detail);
+      container.appendChild(item);
+    });
+  }
+  if (Array.isArray(lead.sourceUrls) && lead.sourceUrls.length > 0) {
+    const sources = document.createElement('div');
+    const term = document.createElement('strong');
+    term.textContent = 'Sources';
+    sources.appendChild(term);
+    lead.sourceUrls.forEach((sourceUrl) => {
+      const source = document.createElement('a');
+      source.href = sourceUrl;
+      source.target = '_blank';
+      source.rel = 'noopener';
+      source.textContent = sourceUrl;
+      sources.appendChild(source);
+    });
+    container.appendChild(sources);
+  }
+}
+
 function renderLeads() {
   const visibleLeads = getVisibleLeads();
   const queuedLeads = currentLeads.filter((lead) => pendingLeadIds.has(lead.id));
@@ -314,13 +356,21 @@ function renderLeads() {
     const name = document.createElement('strong');
     const domain = document.createElement('a');
     const controls = document.createElement('div');
-    const statusSelect = document.createElement('select');
+    const statusMenu = document.createElement('div');
+    const statusButton = document.createElement('button');
+    const statusOptions = document.createElement('div');
     const assess = document.createElement('button');
     const remove = document.createElement('button');
     const selection = document.createElement('input');
+    const profile = document.createElement('div');
     row.className = 'lead-row';
     identity.className = 'lead-identity';
     controls.className = 'lead-controls';
+    statusMenu.className = 'lead-status-menu';
+    statusButton.className = 'lead-status-button';
+    statusOptions.className = 'lead-status-options';
+    profile.className = 'lead-profile';
+    profile.hidden = true;
     selection.className = 'lead-selection';
     selection.type = 'checkbox';
     selection.checked = selectedLeadIds.has(lead.id);
@@ -336,22 +386,69 @@ function renderLeads() {
     domain.href = lead.url;
     domain.target = '_blank';
     domain.rel = 'noopener';
+    statusButton.type = 'button';
+    statusButton.setAttribute('aria-haspopup', 'menu');
+    statusButton.setAttribute('aria-expanded', 'false');
+    statusButton.setAttribute('aria-label', `Status for ${lead.name}`);
+    statusButton.innerHTML = `<span>${LEAD_STATUS_LABELS[lead.status] || 'To assess'}</span><span aria-hidden="true">⌄</span>`;
+    statusOptions.setAttribute('role', 'menu');
+    statusOptions.hidden = true;
     Object.entries(LEAD_STATUS_LABELS).forEach(([value, label]) => {
-      const option = document.createElement('option');
-      option.value = value;
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.role = 'menuitemradio';
+      option.setAttribute('aria-checked', String(lead.status === value));
       option.textContent = label;
-      option.selected = lead.status === value;
-      statusSelect.appendChild(option);
+      option.addEventListener('click', async () => {
+        statusOptions.hidden = true;
+        statusButton.setAttribute('aria-expanded', 'false');
+        if (value === lead.status) return;
+        try {
+          await updateLead(lead.id, { status: value });
+        } catch (error) {
+          leadsStatus.hidden = false;
+          leadsStatus.textContent = error.message;
+        }
+      });
+      statusOptions.appendChild(option);
     });
-    statusSelect.setAttribute('aria-label', `Status for ${lead.name}`);
-    statusSelect.addEventListener('change', async () => {
-      try {
-        await updateLead(lead.id, { status: statusSelect.value });
-      } catch (error) {
-        leadsStatus.hidden = false;
-        leadsStatus.textContent = error.message;
+    const profileButton = document.createElement('button');
+    profileButton.type = 'button';
+    profileButton.role = 'menuitem';
+    profileButton.className = 'lead-profile-button';
+    profileButton.textContent = 'Company info';
+    profileButton.addEventListener('click', async () => {
+      statusOptions.hidden = true;
+      statusButton.setAttribute('aria-expanded', 'false');
+      if (!profile.hidden) {
+        profile.hidden = true;
+        return;
       }
+      profile.hidden = false;
+      if (![lead.address, lead.summary, lead.industry, lead.email, lead.phone, ...(lead.owners || [])].some(Boolean)) {
+        profile.textContent = 'Researching public company information...';
+        try {
+          const enriched = await requestJson(`/api/leads/${encodeURIComponent(lead.id)}/enrich`, { method: 'POST' });
+          Object.assign(lead, enriched);
+          currentLeads = currentLeads.map((candidate) => candidate.id === lead.id ? enriched : candidate);
+        } catch (error) {
+          profile.textContent = error.message;
+          return;
+        }
+      }
+      populateLeadProfile(profile, lead);
     });
+    statusOptions.appendChild(profileButton);
+    statusButton.addEventListener('click', () => {
+      const opening = statusOptions.hidden;
+      document.querySelectorAll('.lead-status-options:not([hidden])').forEach((menu) => { menu.hidden = true; });
+      document.querySelectorAll('.lead-status-button[aria-expanded="true"]').forEach((button) => button.setAttribute('aria-expanded', 'false'));
+      statusOptions.hidden = !opening;
+      statusButton.setAttribute('aria-expanded', String(opening));
+    });
+    statusMenu.append(statusButton, statusOptions);
+
+    populateLeadProfile(profile, lead);
     assess.type = 'button';
     assess.className = 'lead-assess';
     assess.textContent = pendingLeadIds.has(lead.id) ? 'Queued' : 'Assess';
@@ -377,8 +474,9 @@ function renderLeads() {
       }
     });
     identity.append(name, domain);
-    controls.append(statusSelect, assess, remove);
+    controls.append(statusMenu, assess, remove);
     row.append(selection, identity, controls);
+    row.appendChild(profile);
     leadsList.appendChild(row);
   };
 
@@ -887,6 +985,19 @@ assessSelectedLeads.addEventListener('click', () => {
   selectedLeadIds.clear();
   closeLeads();
   leads.forEach((lead) => void runAudit({ url: lead.url, leadId: lead.id }));
+});
+document.addEventListener('click', (event) => {
+  if (event.target.closest('.lead-status-menu')) return;
+  document.querySelectorAll('.lead-status-options:not([hidden])').forEach((menu) => { menu.hidden = true; });
+  document.querySelectorAll('.lead-status-button[aria-expanded="true"]').forEach((button) => button.setAttribute('aria-expanded', 'false'));
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  document.querySelectorAll('.lead-status-options:not([hidden])').forEach((menu) => { menu.hidden = true; });
+  document.querySelectorAll('.lead-status-button[aria-expanded="true"]').forEach((button) => {
+    button.setAttribute('aria-expanded', 'false');
+    button.focus();
+  });
 });
 leadExtractFiles.addEventListener('change', async () => {
   const contents = await Promise.all([...leadExtractFiles.files].map((file) => file.text()));
