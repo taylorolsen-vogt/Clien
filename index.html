@@ -50,7 +50,7 @@
             <h3>Extract leads</h3>
             <label class="lead-file-button">Attach text<input id="leadExtractFiles" type="file" accept=".txt,.csv,.md,text/plain,text/csv,text/markdown" multiple /></label>
           </div>
-          <textarea id="leadExtractInput" aria-label="Content to extract leads from" placeholder="Paste URLs, notes, or a company list"></textarea>
+          <textarea id="leadExtractInput" aria-label="Content to extract leads from" placeholder="Paste URLs, notes, or a list of company names"></textarea>
           <button type="submit">Extract</button>
         </form>
         <section id="leadDrafts" class="lead-drafts" aria-label="Extracted lead drafts" hidden>
@@ -62,14 +62,17 @@
         </section>
         <div class="lead-tools">
           <input id="leadSearch" type="search" placeholder="Search leads" aria-label="Search leads" />
-          <select id="leadStatusFilter" aria-label="Filter leads by status">
-            <option value="active">Active</option>
-            <option value="to-assess">To assess</option>
-            <option value="assessed">Assessed</option>
-            <option value="contacted">Contacted</option>
-            <option value="archived">Archived</option>
-            <option value="all">All</option>
-          </select>
+          <label class="lead-status-filter">
+            <span>Status</span>
+            <select id="leadStatusFilter" aria-label="Filter leads by status">
+              <option value="active">Active</option>
+              <option value="to-assess">To assess</option>
+              <option value="assessed">Assessed</option>
+              <option value="contacted">Contacted</option>
+              <option value="archived">Archived</option>
+              <option value="all">All</option>
+            </select>
+          </label>
         </div>
         <div class="lead-batch-tools">
           <label><input id="selectVisibleLeads" type="checkbox" /> Select visible</label>

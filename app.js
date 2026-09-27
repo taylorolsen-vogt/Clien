@@ -295,6 +295,30 @@ function updateBatchControls(visibleLeads = getVisibleLeads()) {
 
 function populateLeadProfile(container, lead) {
   container.textContent = '';
+  const workflow = document.createElement('div');
+  const workflowLabel = document.createElement('strong');
+  const workflowOptions = document.createElement('div');
+  workflow.className = 'lead-profile-workflow';
+  workflowLabel.textContent = 'Status';
+  workflowOptions.className = 'lead-profile-statuses';
+  Object.entries(LEAD_STATUS_LABELS).forEach(([value, label]) => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.textContent = label;
+    option.setAttribute('aria-pressed', String(lead.status === value));
+    option.addEventListener('click', async () => {
+      if (value === lead.status) return;
+      try {
+        await updateLead(lead.id, { status: value });
+      } catch (error) {
+        leadsStatus.hidden = false;
+        leadsStatus.textContent = error.message;
+      }
+    });
+    workflowOptions.appendChild(option);
+  });
+  workflow.append(workflowLabel, workflowOptions);
+  container.appendChild(workflow);
   const profileValues = [
     ['Address', lead.address],
     ['Owners / founders', Array.isArray(lead.owners) ? lead.owners.join(', ') : ''],
@@ -356,9 +380,7 @@ function renderLeads() {
     const name = document.createElement('strong');
     const domain = document.createElement('a');
     const controls = document.createElement('div');
-    const statusMenu = document.createElement('div');
-    const statusButton = document.createElement('button');
-    const statusOptions = document.createElement('div');
+    const profileButton = document.createElement('button');
     const assess = document.createElement('button');
     const remove = document.createElement('button');
     const selection = document.createElement('input');
@@ -366,9 +388,7 @@ function renderLeads() {
     row.className = 'lead-row';
     identity.className = 'lead-identity';
     controls.className = 'lead-controls';
-    statusMenu.className = 'lead-status-menu';
-    statusButton.className = 'lead-status-button';
-    statusOptions.className = 'lead-status-options';
+    profileButton.className = 'lead-info-button';
     profile.className = 'lead-profile';
     profile.hidden = true;
     selection.className = 'lead-selection';
@@ -386,45 +406,19 @@ function renderLeads() {
     domain.href = lead.url;
     domain.target = '_blank';
     domain.rel = 'noopener';
-    statusButton.type = 'button';
-    statusButton.setAttribute('aria-haspopup', 'menu');
-    statusButton.setAttribute('aria-expanded', 'false');
-    statusButton.setAttribute('aria-label', `Status for ${lead.name}`);
-    statusButton.innerHTML = `<span>${LEAD_STATUS_LABELS[lead.status] || 'To assess'}</span><span aria-hidden="true">⌄</span>`;
-    statusOptions.setAttribute('role', 'menu');
-    statusOptions.hidden = true;
-    Object.entries(LEAD_STATUS_LABELS).forEach(([value, label]) => {
-      const option = document.createElement('button');
-      option.type = 'button';
-      option.role = 'menuitemradio';
-      option.setAttribute('aria-checked', String(lead.status === value));
-      option.textContent = label;
-      option.addEventListener('click', async () => {
-        statusOptions.hidden = true;
-        statusButton.setAttribute('aria-expanded', 'false');
-        if (value === lead.status) return;
-        try {
-          await updateLead(lead.id, { status: value });
-        } catch (error) {
-          leadsStatus.hidden = false;
-          leadsStatus.textContent = error.message;
-        }
-      });
-      statusOptions.appendChild(option);
-    });
-    const profileButton = document.createElement('button');
     profileButton.type = 'button';
-    profileButton.role = 'menuitem';
-    profileButton.className = 'lead-profile-button';
     profileButton.textContent = 'Company info';
+    profileButton.setAttribute('aria-expanded', 'false');
+    profileButton.setAttribute('aria-controls', `lead-profile-${lead.id}`);
+    profile.id = `lead-profile-${lead.id}`;
     profileButton.addEventListener('click', async () => {
-      statusOptions.hidden = true;
-      statusButton.setAttribute('aria-expanded', 'false');
       if (!profile.hidden) {
         profile.hidden = true;
+        profileButton.setAttribute('aria-expanded', 'false');
         return;
       }
       profile.hidden = false;
+      profileButton.setAttribute('aria-expanded', 'true');
       if (![lead.address, lead.summary, lead.industry, lead.email, lead.phone, ...(lead.owners || [])].some(Boolean)) {
         profile.textContent = 'Researching public company information...';
         try {
@@ -438,15 +432,6 @@ function renderLeads() {
       }
       populateLeadProfile(profile, lead);
     });
-    statusOptions.appendChild(profileButton);
-    statusButton.addEventListener('click', () => {
-      const opening = statusOptions.hidden;
-      document.querySelectorAll('.lead-status-options:not([hidden])').forEach((menu) => { menu.hidden = true; });
-      document.querySelectorAll('.lead-status-button[aria-expanded="true"]').forEach((button) => button.setAttribute('aria-expanded', 'false'));
-      statusOptions.hidden = !opening;
-      statusButton.setAttribute('aria-expanded', String(opening));
-    });
-    statusMenu.append(statusButton, statusOptions);
 
     populateLeadProfile(profile, lead);
     assess.type = 'button';
@@ -474,7 +459,7 @@ function renderLeads() {
       }
     });
     identity.append(name, domain);
-    controls.append(statusMenu, assess, remove);
+    controls.append(profileButton, assess, remove);
     row.append(selection, identity, controls);
     row.appendChild(profile);
     leadsList.appendChild(row);
@@ -985,19 +970,6 @@ assessSelectedLeads.addEventListener('click', () => {
   selectedLeadIds.clear();
   closeLeads();
   leads.forEach((lead) => void runAudit({ url: lead.url, leadId: lead.id }));
-});
-document.addEventListener('click', (event) => {
-  if (event.target.closest('.lead-status-menu')) return;
-  document.querySelectorAll('.lead-status-options:not([hidden])').forEach((menu) => { menu.hidden = true; });
-  document.querySelectorAll('.lead-status-button[aria-expanded="true"]').forEach((button) => button.setAttribute('aria-expanded', 'false'));
-});
-document.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape') return;
-  document.querySelectorAll('.lead-status-options:not([hidden])').forEach((menu) => { menu.hidden = true; });
-  document.querySelectorAll('.lead-status-button[aria-expanded="true"]').forEach((button) => {
-    button.setAttribute('aria-expanded', 'false');
-    button.focus();
-  });
 });
 leadExtractFiles.addEventListener('change', async () => {
   const contents = await Promise.all([...leadExtractFiles.files].map((file) => file.text()));

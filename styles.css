@@ -986,7 +986,7 @@ body {
 
 .lead-tools input,
 .lead-tools select,
-.lead-status-button {
+.lead-info-button {
   min-width: 0;
   height: 34px;
   border: 1px solid rgba(0, 0, 0, 0.55);
@@ -995,6 +995,20 @@ body {
   color: var(--black);
   padding: 0 9px;
   font: 0.68rem 'Courier New', Courier, monospace;
+}
+
+.lead-status-filter {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  font: 700 0.56rem 'Courier New', Courier, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lead-status-filter select {
+  width: 100%;
 }
 
 .leads-list {
@@ -1059,61 +1073,12 @@ body {
   gap: 7px;
 }
 
-.lead-status-menu {
-  position: relative;
+.lead-info-button {
   width: 112px;
-}
-
-.lead-status-button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
   cursor: pointer;
-}
-
-.lead-status-options {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 5;
-  width: 152px;
-  border: 1px solid var(--black);
-  background: var(--white);
-  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.16);
-}
-
-.lead-status-options[hidden] {
-  display: none;
-}
-
-.lead-status-options button {
-  display: block;
-  width: 100%;
-  min-height: 34px;
-  border: 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.16);
-  background: var(--white);
-  color: var(--black);
-  padding: 7px 10px;
-  text-align: left;
-  font: 0.66rem 'Courier New', Courier, monospace;
-  cursor: pointer;
-}
-
-.lead-status-options button:hover,
-.lead-status-options button:focus-visible,
-.lead-status-options button[aria-checked='true'] {
-  background: var(--black);
-  color: var(--white);
-  outline: none;
-}
-
-.lead-status-options .lead-profile-button {
-  border-top: 2px solid var(--black);
-  border-bottom: 0;
-  font-weight: 700;
   text-transform: uppercase;
+  font-size: 0.58rem;
+  font-weight: 700;
 }
 
 .lead-profile {
@@ -1134,6 +1099,34 @@ body {
   display: grid;
   gap: 3px;
   min-width: 0;
+}
+
+.lead-profile .lead-profile-workflow {
+  grid-column: 1 / -1;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.16);
+}
+
+.lead-profile-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lead-profile-statuses button {
+  min-height: 30px;
+  border: 1px solid var(--black);
+  background: var(--white);
+  color: var(--black);
+  padding: 0 9px;
+  font: 700 0.58rem 'Courier New', Courier, monospace;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.lead-profile-statuses button[aria-pressed='true'] {
+  background: var(--black);
+  color: var(--white);
 }
 
 .lead-profile strong {
@@ -1339,7 +1332,7 @@ body {
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
-  .lead-status-menu {
+  .lead-info-button {
     width: 100%;
   }
 
