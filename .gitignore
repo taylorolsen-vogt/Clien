@@ -1,0 +1,9 @@
+node_modules/
+recordings/
+reports/
+
+audit-jobs.json
+audit-log.json
+leads.json
+*.tmp
+.DS_Store

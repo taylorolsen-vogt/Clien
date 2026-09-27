@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clien Tapp Audit</title>
+    <meta
+      name="description"
+      content="A Tapp-style website audit workflow for crawling a site, recording a full journey, generating a bug report, and drafting outreach email."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <img class="brand-logo" src="/logo.svg" alt="Clien" />
+        </div>
+        <nav class="topbar-actions" aria-label="Clien records">
+          <button id="leadsButton" class="audit-log-button" type="button" aria-controls="leadsPanel" aria-expanded="false">Leads</button>
+          <button id="auditLogButton" class="audit-log-button" type="button" aria-controls="auditLogPanel" aria-expanded="false">Audit History</button>
+        </nav>
+      </header>
+
+      <div id="auditLogBackdrop" class="audit-log-backdrop" hidden></div>
+      <aside id="auditLogPanel" class="audit-log-panel" role="dialog" aria-modal="true" aria-labelledby="auditLogTitle" hidden>
+        <header class="audit-log-header">
+          <div>
+            <div class="audit-log-kicker">Clien archive</div>
+            <h2 id="auditLogTitle">Audit History</h2>
+          </div>
+          <button id="closeAuditLog" class="audit-log-close" type="button" aria-label="Close audit log">×</button>
+        </header>
+        <div id="auditLogStatus" class="audit-log-status" aria-live="polite">Loading audits...</div>
+        <div id="auditLogList" class="audit-log-list"></div>
+      </aside>
+
+      <aside id="leadsPanel" class="audit-log-panel leads-panel" role="dialog" aria-modal="true" aria-labelledby="leadsTitle" hidden>
+        <header class="audit-log-header">
+          <div>
+            <div class="audit-log-kicker">Prospect queue</div>
+            <h2 id="leadsTitle">Leads</h2>
+          </div>
+          <button id="closeLeads" class="audit-log-close" type="button" aria-label="Close leads">×</button>
+        </header>
+        <form id="leadImportForm" class="lead-import-form">
+          <textarea id="leadImportInput" aria-label="Leads to add" placeholder="Company | website.com&#10;Another Company | another.com"></textarea>
+          <button type="submit">Add leads</button>
+        </form>
+        <div class="lead-tools">
+          <input id="leadSearch" type="search" placeholder="Search leads" aria-label="Search leads" />
+          <select id="leadStatusFilter" aria-label="Filter leads by status">
+            <option value="active">Active</option>
+            <option value="to-assess">To assess</option>
+            <option value="assessed">Assessed</option>
+            <option value="contacted">Contacted</option>
+            <option value="archived">Archived</option>
+            <option value="all">All</option>
+          </select>
+        </div>
+        <div class="lead-batch-tools">
+          <label><input id="selectVisibleLeads" type="checkbox" /> Select visible</label>
+          <span id="leadSelectionCount">0 selected</span>
+          <button id="assessSelectedLeads" type="button" disabled>Assess selected</button>
+        </div>
+        <div id="leadsStatus" class="audit-log-status" aria-live="polite">Loading leads...</div>
+        <div id="leadsList" class="leads-list"></div>
+      </aside>
+
+      <div class="black-band">
+        <div class="search-shell">
+          <input
+            id="siteUrl"
+            type="text"
+            value=""
+            placeholder="Enter website URL"
+            aria-label="Website URL"
+            class="url-input"
+          />
+          <button id="crawlBtn" class="crawl-btn" type="button">Crawl</button>
+        </div>
+      </div>
+
+      <main class="content-stack">
+        <div id="statusNotice" class="status-notice" aria-live="polite" hidden>
+          <span id="progressLabel" class="progress-label">Audit in progress</span>
+          <ol id="progressSteps" class="progress-steps">
+            <li data-progress-phase="exploring">Exploring pages</li>
+            <li data-progress-phase="checking">Checking customer paths</li>
+            <li data-progress-phase="verifying">Verifying errors</li>
+            <li data-progress-phase="building">Building evidence</li>
+            <li data-progress-phase="drafting">Drafting report</li>
+          </ol>
+          <span id="progressCounts" class="progress-counts"></span>
+        </div>
+
+        <div class="results-grid">
+          <section id="reportSection" class="audit-section report-section">
+            <div id="reportState" class="section-state" aria-live="polite" hidden>report complete</div>
+            <div class="report-box">
+              <div id="reportViewControls" class="report-view-controls" hidden>
+                <span>Report view</span>
+                <div class="report-view-switch" role="group" aria-label="Report view">
+                  <button id="refinedReportButton" type="button" aria-pressed="false">Refined</button>
+                  <button id="rawReportButton" type="button" aria-pressed="true">Raw</button>
+                </div>
+              </div>
+              <div id="reportOutput" class="report-output report-output-raw" aria-live="polite">
+                No bugs reported yet.
+              </div>
+              <div id="refinedReport" class="refined-report" hidden></div>
+            </div>
+          </section>
+
+          <section id="videoSection" class="audit-section video-section">
+            <div id="videoState" class="section-state" aria-live="polite" hidden>journey complete</div>
+            <div class="video-shell">
+              <div id="recordingIndicator" class="recording-indicator" aria-live="polite" hidden>
+                <span class="recording-dot"></span>
+                <span class="recording-label">Recording</span>
+              </div>
+              <img id="journeyVideo" alt="Tapp journey capture" />
+              <div id="actionOverlay" class="action-overlay" hidden>
+                <span class="action-label">Tapp action</span>
+                <span id="actionText"></span>
+              </div>
+              <div id="issueOverlay" class="issue-overlay" hidden>
+                <div id="issueScreen" class="issue-screen"></div>
+                <div id="issueList" class="issue-list"></div>
+              </div>
+              <div id="playbackFilter" class="playback-filter" role="group" aria-label="Playback frames" hidden>
+                <button id="allFramesButton" type="button" aria-pressed="true">All frames</button>
+                <button id="issuesOnlyButton" type="button" aria-pressed="false">Issues only</button>
+              </div>
+              <div id="slideshowControls" class="slideshow-controls" hidden>
+                <button id="previousSlide" class="slide-button" type="button" aria-label="Previous capture">←</button>
+                <button id="togglePlayback" class="slide-button" type="button" aria-label="Pause playback">Ⅱ</button>
+                <span id="slideCounter" class="slide-counter" aria-live="polite"></span>
+                <button id="nextSlide" class="slide-button" type="button" aria-label="Next capture">→</button>
+              </div>
+              <div id="videoPlaceholder" class="video-placeholder" aria-hidden="true">
+                <span class="play-button" aria-hidden="true">▶</span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <section id="emailSection" class="audit-section email-section">
+          <div id="artifactLinks" class="artifact-links" hidden>
+            <a id="evidenceLink" href="#" target="_blank" rel="noopener">Open evidence</a>
+            <a id="pdfLink" href="#" target="_blank" rel="noopener" download>Download PDF report</a>
+          </div>
+          <div class="draft-box">
+            <div id="emailOutput" class="email-output">
+              Run a crawl to qualify the lead and draft a personal outreach email.
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
