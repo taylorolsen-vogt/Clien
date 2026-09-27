@@ -188,6 +188,7 @@ recoverInterruptedAuditJobs();
 
 const pendingAuditExecutions = [];
 let auditWorkerRunning = false;
+let activeAuditExecution = null;
 
 function refreshAuditQueuePositions() {
   pendingAuditExecutions.forEach((entry, index) => {
@@ -202,13 +203,16 @@ async function processAuditQueue() {
   auditWorkerRunning = true;
   while (pendingAuditExecutions.length > 0) {
     const entry = pendingAuditExecutions.shift();
+    activeAuditExecution = entry;
     updateAuditJob(entry.job.id, { status: 'running', phase: 'starting', queuePosition: 0 });
     refreshAuditQueuePositions();
     try {
-      const result = await entry.executor(entry.job, entry.baseUrl, entry.onProgress);
+      const result = await entry.executor(entry.job, entry.baseUrl, entry.onProgress, entry.controller.signal);
       entry.resolve(result);
     } catch (error) {
       entry.reject(error);
+    } finally {
+      activeAuditExecution = null;
     }
   }
   auditWorkerRunning = false;
@@ -216,10 +220,26 @@ async function processAuditQueue() {
 
 function enqueueAuditJob(job, baseUrl, onProgress = () => {}, onQueued = () => {}, executor = executeAuditJob) {
   return new Promise((resolve, reject) => {
-    pendingAuditExecutions.push({ job, baseUrl, onProgress, onQueued, executor, resolve, reject });
+    pendingAuditExecutions.push({ job, baseUrl, onProgress, onQueued, executor, resolve, reject, controller: new AbortController() });
     refreshAuditQueuePositions();
     void processAuditQueue();
   });
+}
+
+function cancelAuditJob(id) {
+  if (activeAuditExecution && activeAuditExecution.job.id === id) {
+    activeAuditExecution.controller.abort();
+    return true;
+  }
+  const index = pendingAuditExecutions.findIndex((entry) => entry.job.id === id);
+  if (index < 0) return false;
+  const [entry] = pendingAuditExecutions.splice(index, 1);
+  const error = new Error('Audit canceled.');
+  error.name = 'AbortError';
+  updateAuditJob(id, { status: 'canceled', phase: 'canceled', queuePosition: 0, finishedAt: new Date().toISOString(), error: null });
+  entry.reject(error);
+  refreshAuditQueuePositions();
+  return true;
 }
 
 function normalizeLeadInput(value) {
@@ -229,8 +249,77 @@ function normalizeLeadInput(value) {
   return {
     name: String(value && value.name || companyNameFromDomain(domain)).trim().slice(0, 100),
     url: url.origin,
-    domain
+    domain,
+    address: String(value && value.address || '').trim().slice(0, 300),
+    owners: Array.isArray(value && value.owners) ? value.owners.map((owner) => String(owner).trim()).filter(Boolean).slice(0, 10) : [],
+    summary: String(value && value.summary || '').trim().slice(0, 1000),
+    industry: String(value && value.industry || '').trim().slice(0, 120),
+    email: String(value && value.email || '').trim().slice(0, 200),
+    phone: String(value && value.phone || '').trim().slice(0, 80),
+    sourceUrls: Array.isArray(value && value.sourceUrls) ? value.sourceUrls.map(String).slice(0, 10) : [url.toString()]
   };
+}
+
+function extractUrlsFromText(content) {
+  const matches = String(content || '').match(/(?:https?:\/\/|www\.)[^\s<>()"']+|\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|io|co|biz|us|ca|ai)\b[^\s<>()"']*/gi) || [];
+  const urls = new Map();
+  matches.forEach((match) => {
+    const parsed = safeUrl(match.replace(/[.,;:!?]+$/, ''));
+    if (parsed) urls.set(parsed.hostname.replace(/^www\./, '').toLowerCase(), parsed.origin);
+  });
+  return [...urls.values()].slice(0, 25);
+}
+
+function compactJsonLd(value, output = []) {
+  if (Array.isArray(value)) value.forEach((item) => compactJsonLd(item, output));
+  else if (value && typeof value === 'object') {
+    output.push(value);
+    if (value['@graph']) compactJsonLd(value['@graph'], output);
+  }
+  return output;
+}
+
+async function extractLeadProfile(targetUrl) {
+  const parsed = safeUrl(targetUrl);
+  if (!parsed) return null;
+  const domain = parsed.hostname.replace(/^www\./, '').toLowerCase();
+  const fallback = normalizeLeadInput({ url: parsed.origin, sourceUrls: [parsed.toString()] });
+  try {
+    const response = await fetch(parsed.origin, {
+      signal: AbortSignal.timeout(10000),
+      headers: { 'user-agent': 'Clien/1.0 lead research' }
+    });
+    if (!response.ok) return fallback;
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    const jsonLd = [];
+    $('script[type="application/ld+json"]').each((index, element) => {
+      try { compactJsonLd(JSON.parse($(element).text()), jsonLd); } catch (error) {}
+    });
+    const organization = jsonLd.find((item) => /Organization|LocalBusiness|Corporation/i.test(String(item['@type'] || ''))) || {};
+    const addressValue = organization.address || jsonLd.find((item) => item.address)?.address;
+    const address = typeof addressValue === 'string' ? addressValue : addressValue && [addressValue.streetAddress, addressValue.addressLocality, addressValue.addressRegion, addressValue.postalCode, addressValue.addressCountry].filter(Boolean).join(', ');
+    const founderValue = organization.founder || organization.founders || [];
+    const owners = (Array.isArray(founderValue) ? founderValue : [founderValue]).map((owner) => typeof owner === 'string' ? owner : owner && owner.name).filter(Boolean);
+    const title = $('meta[property="og:site_name"]').attr('content') || organization.name || $('title').first().text().split(/\s+[|–—-]\s+/)[0];
+    const summary = $('meta[name="description"]').attr('content') || $('meta[property="og:description"]').attr('content') || organization.description || '';
+    const bodyText = $('body').text().replace(/\s+/g, ' ');
+    const email = organization.email || (bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i) || [])[0] || '';
+    const phone = organization.telephone || '';
+    return normalizeLeadInput({
+      name: title || companyNameFromDomain(domain),
+      url: parsed.origin,
+      address,
+      owners,
+      summary,
+      industry: organization.industry || organization.knowsAbout || '',
+      email,
+      phone,
+      sourceUrls: [parsed.toString()]
+    });
+  } catch (error) {
+    return fallback;
+  }
 }
 
 function saveAuditLog(result, payload) {
@@ -355,7 +444,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runTappExplore(targetUrl, onProgress = () => {}) {
+async function runTappExplore(targetUrl, onProgress = () => {}, signal) {
   const parsed = safeUrl(targetUrl);
   if (!parsed) {
     throw new Error('Please enter a valid website URL.');
@@ -373,7 +462,12 @@ async function runTappExplore(targetUrl, onProgress = () => {}) {
 
   let activityReported = false;
   await new Promise((resolve, reject) => {
-    const child = execFile('npx', args, { cwd: __dirname }, (error, stdout, stderr) => {
+    const child = execFile('npx', args, { cwd: __dirname, signal }, (error, stdout, stderr) => {
+      if (signal && signal.aborted) {
+        const abortError = new Error('Audit canceled.');
+        abortError.name = 'AbortError';
+        return reject(abortError);
+      }
       if (error && error.code !== 0) {
         return reject(new Error(stderr || stdout || error.message));
       }
@@ -936,9 +1030,9 @@ function createPdfReport(result, payload, filePath) {
   });
 }
 
-async function analyzeWebsite(inputUrl, baseUrl, onProgress = () => {}) {
+async function analyzeWebsite(inputUrl, baseUrl, onProgress = () => {}, signal) {
   onProgress({ phase: 'exploring' });
-  const payload = await runTappExplore(inputUrl, onProgress);
+  const payload = await runTappExplore(inputUrl, onProgress, signal);
   onProgress({
     phase: 'verifying',
     screens: Number(payload && payload.screensExplored || 0),
@@ -972,7 +1066,7 @@ async function analyzeWebsite(inputUrl, baseUrl, onProgress = () => {}) {
   return result;
 }
 
-async function executeAuditJob(job, baseUrl, onProgress = () => {}) {
+async function executeAuditJob(job, baseUrl, onProgress = () => {}, signal) {
   const startedAt = job.startedAt || new Date().toISOString();
   try {
     const result = await analyzeWebsite(job.targetUrl, baseUrl, (progress) => {
@@ -985,7 +1079,7 @@ async function executeAuditJob(job, baseUrl, onProgress = () => {}) {
         startedAt
       });
       onProgress({ ...progress, jobId: job.id });
-    });
+    }, signal);
     const capture = result.raw && result.raw.capture;
     updateAuditJob(job.id, {
       status: 'complete',
@@ -998,11 +1092,12 @@ async function executeAuditJob(job, baseUrl, onProgress = () => {}) {
     });
     return result;
   } catch (error) {
+    const canceled = error.name === 'AbortError' || signal && signal.aborted;
     updateAuditJob(job.id, {
-      status: 'failed',
-      phase: 'failed',
+      status: canceled ? 'canceled' : 'failed',
+      phase: canceled ? 'canceled' : 'failed',
       finishedAt: new Date().toISOString(),
-      error: String(error.message || 'Audit failed.').slice(0, 1000)
+      error: canceled ? null : String(error.message || 'Audit failed.').slice(0, 1000)
     });
     throw error;
   }
@@ -1022,8 +1117,29 @@ app.get('/api/audit-jobs/:id', (req, res) => {
   res.json(job);
 });
 
+app.post('/api/audit-jobs/:id/cancel', (req, res) => {
+  const job = readAuditJobs().jobs.find((candidate) => candidate.id === req.params.id);
+  if (!job) return res.status(404).json({ error: 'Audit job not found.' });
+  if (!['queued', 'running', 'processing'].includes(job.status)) {
+    return res.status(409).json({ error: 'This audit is no longer cancelable.' });
+  }
+  if (!cancelAuditJob(job.id)) return res.status(409).json({ error: 'This audit is no longer active.' });
+  res.json({ ...job, status: 'canceled', phase: 'canceled' });
+});
+
 app.get('/api/leads', (req, res) => {
   res.json(readLeads());
+});
+
+app.post('/api/leads/extract', async (req, res) => {
+  const urls = extractUrlsFromText(req.body && req.body.content);
+  if (urls.length === 0) return res.status(400).json({ error: 'Add at least one website URL to extract leads.' });
+  const leads = [];
+  for (const url of urls) {
+    const lead = await extractLeadProfile(url);
+    if (lead) leads.push(lead);
+  }
+  res.json({ leads });
 });
 
 app.post('/api/leads', (req, res) => {
@@ -1137,6 +1253,8 @@ module.exports = {
   createPdfReport,
   estimateProjectPrice,
   extractCompanyProfile,
+  extractLeadProfile,
+  extractUrlsFromText,
   getCaptureMedia,
   gradeOutreachOpportunity,
   findingFingerprint,
@@ -1150,6 +1268,7 @@ module.exports = {
   updateAuditJob,
   recoverInterruptedAuditJobs,
   enqueueAuditJob,
+  cancelAuditJob,
   saveAuditLog,
   slugifyCompanyName,
   describeExpectedBehavior,

@@ -45,10 +45,21 @@
           </div>
           <button id="closeLeads" class="audit-log-close" type="button" aria-label="Close leads">×</button>
         </header>
-        <form id="leadImportForm" class="lead-import-form">
-          <textarea id="leadImportInput" aria-label="Leads to add" placeholder="Company | website.com&#10;Another Company | another.com"></textarea>
-          <button type="submit">Add leads</button>
+        <form id="leadExtractForm" class="lead-extract-form">
+          <div class="lead-extract-heading">
+            <h3>Extract leads</h3>
+            <label class="lead-file-button">Attach text<input id="leadExtractFiles" type="file" accept=".txt,.csv,.md,text/plain,text/csv,text/markdown" multiple /></label>
+          </div>
+          <textarea id="leadExtractInput" aria-label="Content to extract leads from" placeholder="Paste URLs, notes, or a company list"></textarea>
+          <button type="submit">Extract</button>
         </form>
+        <section id="leadDrafts" class="lead-drafts" aria-label="Extracted lead drafts" hidden>
+          <div class="lead-drafts-heading">
+            <h3>Review extracted</h3>
+            <button id="approveLeadDrafts" type="button">Add selected</button>
+          </div>
+          <div id="leadDraftList"></div>
+        </section>
         <div class="lead-tools">
           <input id="leadSearch" type="search" placeholder="Search leads" aria-label="Search leads" />
           <select id="leadStatusFilter" aria-label="Filter leads by status">
@@ -85,7 +96,10 @@
 
       <main class="content-stack">
         <div id="statusNotice" class="status-notice" aria-live="polite" hidden>
-          <span id="progressLabel" class="progress-label">Audit in progress</span>
+          <div class="progress-heading">
+            <span id="progressLabel" class="progress-label">Audit in progress</span>
+            <button id="cancelAuditButton" class="cancel-audit-button" type="button" aria-label="Cancel active audit" title="Cancel active audit" hidden>×</button>
+          </div>
           <ol id="progressSteps" class="progress-steps">
             <li data-progress-phase="exploring">Exploring pages</li>
             <li data-progress-phase="checking">Checking customer paths</li>

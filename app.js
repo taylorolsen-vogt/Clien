@@ -11,6 +11,7 @@ const videoPlaceholder = document.getElementById('videoPlaceholder');
 const recordingIndicator = document.getElementById('recordingIndicator');
 const statusNotice = document.getElementById('statusNotice');
 const progressLabel = document.getElementById('progressLabel');
+const cancelAuditButton = document.getElementById('cancelAuditButton');
 const progressSteps = [...document.querySelectorAll('[data-progress-phase]')];
 const progressCounts = document.getElementById('progressCounts');
 const videoState = document.getElementById('videoState');
@@ -43,8 +44,12 @@ const auditLogList = document.getElementById('auditLogList');
 const leadsButton = document.getElementById('leadsButton');
 const leadsPanel = document.getElementById('leadsPanel');
 const closeLeadsButton = document.getElementById('closeLeads');
-const leadImportForm = document.getElementById('leadImportForm');
-const leadImportInput = document.getElementById('leadImportInput');
+const leadExtractForm = document.getElementById('leadExtractForm');
+const leadExtractInput = document.getElementById('leadExtractInput');
+const leadExtractFiles = document.getElementById('leadExtractFiles');
+const leadDrafts = document.getElementById('leadDrafts');
+const leadDraftList = document.getElementById('leadDraftList');
+const approveLeadDrafts = document.getElementById('approveLeadDrafts');
 const leadSearch = document.getElementById('leadSearch');
 const leadStatusFilter = document.getElementById('leadStatusFilter');
 const selectVisibleLeads = document.getElementById('selectVisibleLeads');
@@ -62,6 +67,10 @@ let currentRefinedReport = null;
 let currentReportMeta = null;
 let currentLeads = [];
 let activeAuditRequests = 0;
+let activeAuditJobId = null;
+let activeAuditUrl = null;
+let canceledAuditUrl = null;
+let extractedLeadDrafts = [];
 const selectedLeadIds = new Set();
 const pendingLeadIds = new Set();
 
@@ -83,6 +92,18 @@ function setAuditProgress({ phase = 'exploring', screens, actions } = {}) {
   if (Number.isFinite(screens)) counts.push(`${screens} screens`);
   if (Number.isFinite(actions)) counts.push(`${actions} actions`);
   progressCounts.textContent = counts.join(' · ');
+}
+
+function updateCrawlButton() {
+  if (activeAuditRequests > 0) {
+    crawlBtn.textContent = 'Queue';
+    return;
+  }
+  if (!canceledAuditUrl) {
+    crawlBtn.textContent = 'Crawl';
+    return;
+  }
+  crawlBtn.textContent = siteUrlInput.value.trim() === canceledAuditUrl ? 'Retry' : 'Crawl again';
 }
 
 function setReportView(view) {
@@ -208,12 +229,45 @@ async function requestJson(url, options = {}) {
   return response.status === 204 ? null : response.json();
 }
 
-function parseLeadLines(value) {
-  return value.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
-    const parts = line.split(/\s*[|\t,]\s*/).filter(Boolean);
-    if (parts.length === 1) return { url: parts[0] };
-    const url = parts.pop();
-    return { name: parts.join(' '), url };
+function createDraftField(draft, label, key, multiline = false) {
+  const wrapper = document.createElement('label');
+  const caption = document.createElement('span');
+  const control = document.createElement(multiline ? 'textarea' : 'input');
+  wrapper.className = `lead-draft-field${multiline ? ' is-wide' : ''}`;
+  caption.textContent = label;
+  control.value = key === 'owners' ? (draft.owners || []).join(', ') : draft[key] || '';
+  control.addEventListener('input', () => {
+    draft[key] = key === 'owners' ? control.value.split(',').map((value) => value.trim()).filter(Boolean) : control.value;
+  });
+  wrapper.append(caption, control);
+  return wrapper;
+}
+
+function renderLeadDrafts() {
+  leadDraftList.textContent = '';
+  leadDrafts.hidden = extractedLeadDrafts.length === 0;
+  extractedLeadDrafts.forEach((draft, index) => {
+    const card = document.createElement('article');
+    const select = document.createElement('input');
+    const fields = document.createElement('div');
+    card.className = 'lead-draft';
+    fields.className = 'lead-draft-fields';
+    select.type = 'checkbox';
+    select.checked = draft.selected !== false;
+    select.setAttribute('aria-label', `Add ${draft.name || draft.domain}`);
+    select.addEventListener('change', () => { extractedLeadDrafts[index].selected = select.checked; });
+    fields.append(
+      createDraftField(draft, 'Company', 'name'),
+      createDraftField(draft, 'URL', 'url'),
+      createDraftField(draft, 'Address', 'address'),
+      createDraftField(draft, 'Owners / founders', 'owners'),
+      createDraftField(draft, 'Industry', 'industry'),
+      createDraftField(draft, 'Email', 'email'),
+      createDraftField(draft, 'Phone', 'phone'),
+      createDraftField(draft, 'Mission / summary', 'summary', true)
+    );
+    card.append(select, fields);
+    leadDraftList.appendChild(card);
   });
 }
 
@@ -653,7 +707,7 @@ function scrollToStage(stage) {
   stage.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-function streamAudit(url, onQueued) {
+function streamAudit(url, handlers = {}) {
   return new Promise((resolve, reject) => {
     const params = new URLSearchParams({ url });
     const source = new EventSource(`/api/analyze/stream?${params.toString()}`);
@@ -667,8 +721,13 @@ function streamAudit(url, onQueued) {
       }));
       return progressQueue;
     };
-    source.addEventListener('queued', (event) => onQueued(JSON.parse(event.data)));
-    source.addEventListener('progress', (event) => queueProgress(JSON.parse(event.data)));
+    source.addEventListener('job', (event) => handlers.onJob && handlers.onJob(JSON.parse(event.data)));
+    source.addEventListener('queued', (event) => handlers.onQueued && handlers.onQueued(JSON.parse(event.data)));
+    source.addEventListener('progress', (event) => {
+      const progress = JSON.parse(event.data);
+      if (handlers.onProgress) handlers.onProgress(progress);
+      queueProgress(progress);
+    });
     source.addEventListener('result', async (event) => {
       settled = true;
       source.close();
@@ -706,7 +765,7 @@ async function runAudit({ url: submittedUrl, leadId = null } = {}) {
     pendingLeadIds.add(leadId);
     renderLeads();
   }
-  crawlBtn.textContent = 'Queue';
+  updateCrawlButton();
   setRecordingState(true);
   if (isFirstRequest) {
     setAuditProgress({ phase: 'exploring' });
@@ -723,10 +782,19 @@ async function runAudit({ url: submittedUrl, leadId = null } = {}) {
     setSectionState(false, false);
   }
 
+  let jobId = null;
   try {
-    const data = await streamAudit(url, ({ position }) => {
-      if (position > 1 || !isFirstRequest) {
-        setStatusText(`Audit queued · ${position} waiting`);
+    const data = await streamAudit(url, {
+      onJob: (job) => { jobId = job.jobId; },
+      onQueued: ({ position }) => {
+        if (position > 1 || !isFirstRequest) {
+          setStatusText(`Audit queued · ${position} waiting`);
+        }
+      },
+      onProgress: (progress) => {
+        activeAuditJobId = progress.jobId || jobId;
+        activeAuditUrl = url;
+        cancelAuditButton.hidden = !activeAuditJobId;
       }
     });
 
@@ -737,24 +805,47 @@ async function runAudit({ url: submittedUrl, leadId = null } = {}) {
 
     requestAnimationFrame(() => scrollToStage(reportSection));
   } catch (error) {
-    reportOutput.textContent = `> Audit failed\n> ${error.message}`;
+    const canceled = error.message === 'Audit canceled.';
+    if (canceled) {
+      canceledAuditUrl = url;
+      siteUrlInput.value = url;
+    }
+    reportOutput.textContent = canceled ? '> Audit canceled\n> Ready to retry' : `> Audit failed\n> ${error.message}`;
     emailOutput.textContent = 'No draft available.';
     videoPlaceholder.innerHTML = '<span class="play-button" aria-hidden="true">▶</span>';
     setRecordingState(false);
     setSectionState(false, false);
-    setStatusText('Audit failed');
+    setStatusText(canceled ? 'Audit canceled' : 'Audit failed');
   } finally {
     activeAuditRequests -= 1;
+    if (activeAuditJobId === jobId) {
+      activeAuditJobId = null;
+      activeAuditUrl = null;
+      cancelAuditButton.hidden = true;
+    }
     if (leadId) {
       pendingLeadIds.delete(leadId);
       renderLeads();
     }
-    crawlBtn.textContent = activeAuditRequests > 0 ? 'Queue' : 'Crawl';
+    updateCrawlButton();
     setRecordingState(activeAuditRequests > 0);
   }
 }
 
 crawlBtn.addEventListener('click', () => runAudit());
+cancelAuditButton.addEventListener('click', async () => {
+  if (!activeAuditJobId) return;
+  cancelAuditButton.disabled = true;
+  try {
+    await requestJson(`/api/audit-jobs/${encodeURIComponent(activeAuditJobId)}/cancel`, { method: 'POST' });
+    if (activeAuditUrl) siteUrlInput.value = activeAuditUrl;
+  } catch (error) {
+    setStatusText(error.message);
+  } finally {
+    cancelAuditButton.disabled = false;
+  }
+});
+siteUrlInput.addEventListener('input', updateCrawlButton);
 siteUrlInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') runAudit();
 });
@@ -797,9 +888,30 @@ assessSelectedLeads.addEventListener('click', () => {
   closeLeads();
   leads.forEach((lead) => void runAudit({ url: lead.url, leadId: lead.id }));
 });
-leadImportForm.addEventListener('submit', async (event) => {
+leadExtractFiles.addEventListener('change', async () => {
+  const contents = await Promise.all([...leadExtractFiles.files].map((file) => file.text()));
+  leadExtractInput.value = [leadExtractInput.value, ...contents].filter(Boolean).join('\n');
+});
+leadExtractForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const leads = parseLeadLines(leadImportInput.value);
+  const content = leadExtractInput.value.trim();
+  if (!content) return;
+  leadsStatus.hidden = false;
+  leadsStatus.textContent = 'Extracting public company details...';
+  try {
+    const result = await requestJson('/api/leads/extract', {
+      method: 'POST',
+      body: JSON.stringify({ content })
+    });
+    extractedLeadDrafts = result.leads.map((lead) => ({ ...lead, selected: true }));
+    renderLeadDrafts();
+    leadsStatus.textContent = `${extractedLeadDrafts.length} draft${extractedLeadDrafts.length === 1 ? '' : 's'} ready for review.`;
+  } catch (error) {
+    leadsStatus.textContent = error.message;
+  }
+});
+approveLeadDrafts.addEventListener('click', async () => {
+  const leads = extractedLeadDrafts.filter((lead) => lead.selected);
   if (leads.length === 0) return;
   try {
     const result = await requestJson('/api/leads', {
@@ -807,7 +919,10 @@ leadImportForm.addEventListener('submit', async (event) => {
       body: JSON.stringify({ leads })
     });
     currentLeads = result.archive.leads;
-    leadImportInput.value = '';
+    extractedLeadDrafts = [];
+    leadExtractInput.value = '';
+    leadExtractFiles.value = '';
+    renderLeadDrafts();
     renderLeads();
     leadsStatus.hidden = false;
     leadsStatus.textContent = result.created > 0 ? `${result.created} lead${result.created === 1 ? '' : 's'} added.` : 'No new leads added.';
