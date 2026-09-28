@@ -48,7 +48,7 @@
         <form id="leadExtractForm" class="lead-extract-form">
           <div class="lead-extract-heading">
             <h3>Extract leads</h3>
-            <label class="lead-file-button">Attach text<input id="leadExtractFiles" type="file" accept=".txt,.csv,.md,text/plain,text/csv,text/markdown" multiple /></label>
+            <label class="lead-file-button">Attach file<input id="leadExtractFiles" type="file" accept=".txt,.csv,.md,text/plain,text/csv,text/markdown" multiple /></label>
           </div>
           <textarea id="leadExtractInput" aria-label="Content to extract leads from" placeholder="Paste URLs, notes, or a list of company names"></textarea>
           <button type="submit">Extract</button>
@@ -138,6 +138,7 @@
                 <span class="recording-dot"></span>
                 <span class="recording-label">Recording</span>
               </div>
+              <video id="journeyPlayer" playsinline preload="metadata"></video>
               <img id="journeyVideo" alt="Tapp journey capture" />
               <div id="actionOverlay" class="action-overlay" hidden>
                 <span class="action-label">Tapp action</span>
@@ -167,6 +168,7 @@
         <section id="emailSection" class="audit-section email-section">
           <div id="artifactLinks" class="artifact-links" hidden>
             <a id="evidenceLink" href="#" target="_blank" rel="noopener">Open evidence</a>
+            <a id="videoLink" href="#" target="_blank" rel="noopener">Open video</a>
             <a id="pdfLink" href="#" target="_blank" rel="noopener" download>Download PDF report</a>
           </div>
           <div class="draft-box">

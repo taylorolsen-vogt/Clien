@@ -349,7 +349,9 @@ function saveAuditLog(result, payload) {
       type: 'tapp-frame-sequence',
       frames: result.slides.length,
       capturePath,
-      url: result.evidenceUrl
+      url: result.evidenceUrl,
+      videoUrl: result.evidenceVideo && result.evidenceVideo.fullUrl || null,
+      issuesVideoUrl: result.evidenceVideo && result.evidenceVideo.issuesUrl || null
     },
     report: {
       pdfUrl: result.reportPdfUrl,
@@ -600,6 +602,70 @@ function getCaptureMedia(payload, findings) {
     : null;
 
   return { slides, reportHtml };
+}
+
+function runCommand(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { cwd: __dirname, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) return reject(new Error(stderr || stdout || error.message));
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function concatFilePath(filePath) {
+  return filePath.replace(/'/g, "'\\''");
+}
+
+async function encodeEvidenceVideo(capturePath, outputPath, slides) {
+  if (!capturePath || slides.length === 0) return null;
+  const listPath = `${outputPath}.txt`;
+  const lines = [];
+  slides.forEach((slide) => {
+    const imagePath = path.join(capturePath, decodeURIComponent(path.basename(slide.src)));
+    lines.push(`file '${concatFilePath(imagePath)}'`, `duration ${slide.duration.toFixed(3)}`);
+  });
+  const finalImagePath = path.join(capturePath, decodeURIComponent(path.basename(slides[slides.length - 1].src)));
+  lines.push(`file '${concatFilePath(finalImagePath)}'`);
+  fs.writeFileSync(listPath, `${lines.join('\n')}\n`);
+  try {
+    await runCommand('ffmpeg', [
+      '-y', '-f', 'concat', '-safe', '0', '-i', listPath,
+      '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p',
+      '-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-movflags', '+faststart', outputPath
+    ]);
+  } finally {
+    try { fs.unlinkSync(listPath); } catch (error) {}
+  }
+  return outputPath;
+}
+
+async function createEvidenceVideos(payload, slides) {
+  const capturePath = payload && payload.capture && payload.capture.path;
+  if (!capturePath || slides.length === 0) return null;
+  const captureId = payload.capture.id || path.basename(capturePath);
+  const outputDirectory = path.join(recordingsDir, captureId);
+  fs.mkdirSync(outputDirectory, { recursive: true });
+  const fullSlides = slides.map((slide, frameIndex) => ({ ...slide, frameIndex, duration: slide.issues.length > 0 ? 3 : 1.2 }));
+  const issueSlides = fullSlides.filter((slide) => slide.issues.length > 0).map((slide) => ({ ...slide, duration: 3 }));
+  const addTimeline = (entries) => {
+    let currentTime = 0;
+    return entries.map((slide) => {
+      const item = { frameIndex: slide.frameIndex, startTime: currentTime, duration: slide.duration };
+      currentTime += slide.duration;
+      return item;
+    });
+  };
+  const fullPath = path.join(outputDirectory, 'full.mp4');
+  const issuesPath = path.join(outputDirectory, 'issues.mp4');
+  await encodeEvidenceVideo(capturePath, fullPath, fullSlides);
+  if (issueSlides.length > 0) await encodeEvidenceVideo(capturePath, issuesPath, issueSlides);
+  return {
+    fullUrl: `/recordings/${encodeURIComponent(captureId)}/full.mp4`,
+    issuesUrl: issueSlides.length > 0 ? `/recordings/${encodeURIComponent(captureId)}/issues.mp4` : null,
+    fullTimeline: addTimeline(fullSlides),
+    issuesTimeline: addTimeline(issueSlides)
+  };
 }
 
 const SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
@@ -862,7 +928,7 @@ function summarizeFindings(payload, context = {}) {
     priorFindingFingerprints: Array.isArray(context.priorFindingFingerprints) ? context.priorFindingFingerprints : []
   };
 
-  const media = getCaptureMedia(payload, findings);
+  const media = context.media || getCaptureMedia(payload, findings);
   const mapped = findings.map((finding, index) => {
     const title = finding && finding.title ? finding.title.replace(/\u001b\[[0-9;]*m/g, '') : 'Potential issue';
     const severity = finding && finding.severity ? String(finding.severity).toUpperCase() : 'INFO';
@@ -985,6 +1051,7 @@ function summarizeFindings(payload, context = {}) {
     pagesScanned: payload && payload.coverage && payload.coverage.screensExplored ? payload.coverage.screensExplored : 0,
     elementsFound: payload && payload.complete && payload.complete.actions ? payload.complete.actions : 0,
     videoUrl: media.reportHtml,
+    evidenceVideo: context.evidenceVideo || null,
     evidenceUrl,
     reportPdfUrl,
     slides: media.slides,
@@ -1060,6 +1127,11 @@ async function analyzeWebsite(inputUrl, baseUrl, onProgress = () => {}, signal) 
     reportPdfUrl,
     ...comparison
   });
+  try {
+    result.evidenceVideo = await createEvidenceVideos(payload, result.slides);
+  } catch (error) {
+    console.error(`Evidence video encoding failed: ${error.message}`);
+  }
   onProgress({ phase: 'drafting', screens: Number(payload && payload.screensExplored || 0), actions: Number(payload && payload.actionsPerformed || 0) });
   await createPdfReport(result, payload, path.join(reportDirectory, pdfFilename));
   saveAuditLog(result, payload);
@@ -1267,6 +1339,7 @@ module.exports = {
   extractLeadProfile,
   extractUrlsFromText,
   getCaptureMedia,
+  createEvidenceVideos,
   gradeOutreachOpportunity,
   findingFingerprint,
   findingConfidence,

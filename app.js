@@ -7,6 +7,7 @@ const rawReportButton = document.getElementById('rawReportButton');
 const refinedReport = document.getElementById('refinedReport');
 const emailOutput = document.getElementById('emailOutput');
 const journeyVideo = document.getElementById('journeyVideo');
+const journeyPlayer = document.getElementById('journeyPlayer');
 const videoPlaceholder = document.getElementById('videoPlaceholder');
 const recordingIndicator = document.getElementById('recordingIndicator');
 const statusNotice = document.getElementById('statusNotice');
@@ -34,6 +35,7 @@ const allFramesButton = document.getElementById('allFramesButton');
 const issuesOnlyButton = document.getElementById('issuesOnlyButton');
 const artifactLinks = document.getElementById('artifactLinks');
 const evidenceLink = document.getElementById('evidenceLink');
+const videoLink = document.getElementById('videoLink');
 const pdfLink = document.getElementById('pdfLink');
 const auditLogButton = document.getElementById('auditLogButton');
 const auditLogBackdrop = document.getElementById('auditLogBackdrop');
@@ -71,6 +73,7 @@ let activeAuditJobId = null;
 let activeAuditUrl = null;
 let canceledAuditUrl = null;
 let extractedLeadDrafts = [];
+let evidenceVideo = null;
 const selectedLeadIds = new Set();
 const pendingLeadIds = new Set();
 
@@ -554,6 +557,7 @@ function renderAuditLog(archive) {
       metrics.textContent = `Grade ${entry.audit.grade} · ${entry.audit.findings} findings · ${entry.evidence.frames} frames${repeatSummary}`;
       summary.append(date, metrics);
       if (entry.evidence && entry.evidence.url) links.appendChild(createAuditLink('Evidence', entry.evidence.url));
+      if (entry.evidence && entry.evidence.videoUrl) links.appendChild(createAuditLink('Video', entry.evidence.videoUrl));
       if (entry.report && entry.report.pdfUrl) links.appendChild(createAuditLink('PDF', entry.report.pdfUrl));
       run.append(summary, links);
       audits.appendChild(run);
@@ -621,6 +625,7 @@ function stopSlideshow() {
     slideshowTimer = null;
   }
   slideshowPlaying = false;
+  journeyPlayer.pause();
   togglePlayback.textContent = '▶';
   togglePlayback.setAttribute('aria-label', 'Play capture sequence');
 }
@@ -649,7 +654,13 @@ function stepSlide(direction) {
   const nextPosition = currentPosition < 0
     ? 0
     : (currentPosition + direction + indices.length) % indices.length;
-  showSlide(indices[nextPosition]);
+  const nextIndex = indices[nextPosition];
+  if (evidenceVideo) {
+    const timeline = playbackMode === 'issues' ? evidenceVideo.issuesTimeline : evidenceVideo.fullTimeline;
+    const timestamp = timeline.find((item) => item.frameIndex === nextIndex);
+    if (timestamp) journeyPlayer.currentTime = timestamp.startTime;
+  }
+  showSlide(nextIndex);
 }
 
 function setPlaybackMode(mode, preferredIndex = null) {
@@ -659,6 +670,22 @@ function setPlaybackMode(mode, preferredIndex = null) {
   issuesOnlyButton.setAttribute('aria-pressed', String(playbackMode === 'issues'));
   issuesOnlyButton.disabled = !hasIssueFrames;
   if (slideshowSlides.length === 0) return;
+  if (evidenceVideo) {
+    const timeline = playbackMode === 'issues' ? evidenceVideo.issuesTimeline : evidenceVideo.fullTimeline;
+    const source = playbackMode === 'issues' ? evidenceVideo.issuesUrl : evidenceVideo.fullUrl;
+    const preferred = timeline.find((item) => item.frameIndex === preferredIndex) || timeline[0];
+    const shouldPlay = !journeyPlayer.paused;
+    if (journeyPlayer.getAttribute('src') !== source) {
+      journeyPlayer.src = source;
+      journeyPlayer.addEventListener('loadedmetadata', () => {
+        journeyPlayer.currentTime = preferred ? preferred.startTime : 0;
+        if (shouldPlay) journeyPlayer.play().catch(() => {});
+      }, { once: true });
+    } else if (preferred) {
+      journeyPlayer.currentTime = preferred.startTime;
+    }
+    return;
+  }
   const indices = getPlaybackIndices();
   const nextIndex = preferredIndex !== null && indices.includes(preferredIndex)
     ? preferredIndex
@@ -668,6 +695,13 @@ function setPlaybackMode(mode, preferredIndex = null) {
 
 function playSlideshow() {
   if (slideshowSlides.length === 0) return;
+  if (evidenceVideo) {
+    journeyPlayer.play().catch(() => {});
+    slideshowPlaying = true;
+    togglePlayback.textContent = 'Ⅱ';
+    togglePlayback.setAttribute('aria-label', 'Pause evidence video');
+    return;
+  }
   slideshowPlaying = true;
   togglePlayback.textContent = 'Ⅱ';
   togglePlayback.setAttribute('aria-label', 'Pause capture sequence');
@@ -693,15 +727,43 @@ function startSlideshow(slides) {
   playSlideshow();
 }
 
+function updateEvidenceOverlay() {
+  if (!evidenceVideo || slideshowSlides.length === 0) return;
+  const timeline = playbackMode === 'issues' ? evidenceVideo.issuesTimeline : evidenceVideo.fullTimeline;
+  const item = [...timeline].reverse().find((entry) => journeyPlayer.currentTime >= entry.startTime) || timeline[0];
+  if (!item || item.frameIndex === slideshowIndex) return;
+  showSlide(item.frameIndex);
+}
+
+function startEvidenceVideo(video, slides) {
+  evidenceVideo = video;
+  slideshowSlides = slides;
+  slideshowIndex = -1;
+  journeyVideo.style.display = 'none';
+  journeyPlayer.style.display = 'block';
+  playbackFilter.hidden = false;
+  slideshowControls.hidden = false;
+  setPlaybackMode('all', 0);
+  journeyPlayer.play().catch(() => {});
+}
+
 function showSlide(index) {
   if (slideshowSlides.length === 0) return;
   slideshowIndex = (index + slideshowSlides.length) % slideshowSlides.length;
   const slide = slideshowSlides[slideshowIndex];
   const source = typeof slide === 'string' ? slide : slide.src;
   const issues = typeof slide === 'string' || !Array.isArray(slide.issues) ? [] : slide.issues;
-  journeyVideo.src = source;
-  journeyVideo.style.display = 'block';
-  journeyVideo.alt = `${slide.screen || 'Website'} capture ${slideshowIndex + 1} of ${slideshowSlides.length}`;
+  if (evidenceVideo) {
+    const timeline = playbackMode === 'issues' ? evidenceVideo.issuesTimeline : evidenceVideo.fullTimeline;
+    const timestamp = timeline.find((item) => item.frameIndex === slideshowIndex);
+    if (timestamp && Math.abs(journeyPlayer.currentTime - timestamp.startTime) > timestamp.duration) {
+      journeyPlayer.currentTime = timestamp.startTime;
+    }
+  } else {
+    journeyVideo.src = source;
+    journeyVideo.style.display = 'block';
+    journeyVideo.alt = `${slide.screen || 'Website'} capture ${slideshowIndex + 1} of ${slideshowSlides.length}`;
+  }
   const playbackIndices = getPlaybackIndices();
   const playbackPosition = playbackIndices.indexOf(slideshowIndex) + 1;
   slideCounter.textContent = playbackMode === 'issues'
@@ -749,6 +811,10 @@ function renderAudit(result) {
   );
 
   stopSlideshow();
+  evidenceVideo = null;
+  journeyPlayer.removeAttribute('src');
+  journeyPlayer.load();
+  journeyPlayer.style.display = 'none';
   slideshowSlides = [];
   slideshowControls.hidden = true;
   playbackFilter.hidden = true;
@@ -764,10 +830,17 @@ function renderAudit(result) {
     pdfLink.href = result.reportPdfUrl;
     artifactLinks.hidden = false;
   }
+  if (result.evidenceVideo && result.evidenceVideo.fullUrl) {
+    videoLink.href = result.evidenceVideo.fullUrl;
+    artifactLinks.hidden = false;
+  }
   evidenceLink.hidden = !result.evidenceUrl;
+  videoLink.hidden = !(result.evidenceVideo && result.evidenceVideo.fullUrl);
   pdfLink.hidden = !result.reportPdfUrl;
 
-  if (hasVideo) {
+  if (hasVideo && result.evidenceVideo && result.evidenceVideo.fullUrl) {
+    startEvidenceVideo(result.evidenceVideo, slides);
+  } else if (hasVideo) {
     startSlideshow(slides);
   } else {
     journeyVideo.removeAttribute('src');
@@ -933,11 +1006,11 @@ siteUrlInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') runAudit();
 });
 previousSlide.addEventListener('click', () => {
-  stopSlideshow();
+  if (!evidenceVideo) stopSlideshow();
   stepSlide(-1);
 });
 nextSlide.addEventListener('click', () => {
-  stopSlideshow();
+  if (!evidenceVideo) stopSlideshow();
   stepSlide(1);
 });
 togglePlayback.addEventListener('click', () => {
@@ -946,6 +1019,20 @@ togglePlayback.addEventListener('click', () => {
   } else {
     playSlideshow();
   }
+});
+journeyPlayer.addEventListener('timeupdate', updateEvidenceOverlay);
+journeyPlayer.addEventListener('play', () => {
+  slideshowPlaying = true;
+  togglePlayback.textContent = 'Ⅱ';
+  togglePlayback.setAttribute('aria-label', 'Pause evidence video');
+});
+journeyPlayer.addEventListener('pause', () => {
+  slideshowPlaying = false;
+  togglePlayback.textContent = '▶';
+  togglePlayback.setAttribute('aria-label', 'Play evidence video');
+});
+journeyPlayer.addEventListener('ended', () => {
+  journeyPlayer.currentTime = 0;
 });
 refinedReportButton.addEventListener('click', () => setReportView('refined'));
 rawReportButton.addEventListener('click', () => setReportView('raw'));
